@@ -37,6 +37,8 @@ import { MarcusAureliusIcon } from "./components/MarcusAureliusIcon";
 import { StreakDisplay } from "./components/StreakDisplay";
 import { Breadcrumbs } from "./components/Breadcrumbs";
 import { syncAIPrompts } from "./utils/apiClient";
+import { isFeatureEnabled } from "./features.config";
+import { MaintenanceStub } from "./components/MaintenanceStub";
 
 import StudentDashboard from "./pages/StudentDashboard";
 import AuthScreen from "./components/AuthScreen";
@@ -50,6 +52,7 @@ import VibeApiHealthMonitor from "./vibe-sandbox/VibeApiHealthMonitor";
 import AdminCreateCards from "./pages/AdminCreateCards";
 import VerifyEmailScreen from "./components/VerifyEmailScreen";
 import CategoryView from "./pages/CategoryView";
+import SandboxRouter from "./sandbox/SandboxRouter";
 
 import { GlobalErrorToast } from "./components/GlobalErrorToast";
 import { AudioVisualizer } from "./components/AudioVisualizer";
@@ -2157,7 +2160,11 @@ export default function App() {
               path="/teacher"
               element={
                 <PageWrapper>
-                  <TeacherDashboard />
+                  {isFeatureEnabled("ENABLE_TEACHER_DASHBOARD") ? (
+                    <TeacherDashboard />
+                  ) : (
+                    <MaintenanceStub featureName="Teacher Dashboard" />
+                  )}
                 </PageWrapper>
               }
             />
@@ -2173,7 +2180,11 @@ export default function App() {
               path="/co-study"
               element={
                 <PageWrapper>
-                  <CoStudyRoom />
+                  {isFeatureEnabled("ENABLE_CO_STUDY") ? (
+                    <CoStudyRoom />
+                  ) : (
+                    <MaintenanceStub featureName="Co-Study Room" />
+                  )}
                 </PageWrapper>
               }
             />
@@ -2205,7 +2216,11 @@ export default function App() {
               path="/admin/create-cards"
               element={
                 <PageWrapper>
-                  <AdminCreateCards />
+                  {isFeatureEnabled("ENABLE_ADMIN_CREATE") ? (
+                    <AdminCreateCards />
+                  ) : (
+                    <MaintenanceStub featureName="Admin Create Cards" />
+                  )}
                 </PageWrapper>
               }
             />
@@ -2214,6 +2229,14 @@ export default function App() {
               element={
                 <PageWrapper>
                   <CategoryView />
+                </PageWrapper>
+              }
+            />
+            <Route
+              path="/sandbox/*"
+              element={
+                <PageWrapper>
+                  <SandboxRouter />
                 </PageWrapper>
               }
             />

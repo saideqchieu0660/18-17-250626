@@ -146,6 +146,8 @@ import {
 import { toast } from "sonner";
 import { getEnvDiagnostics } from "../utils/envDiagnostics";
 import { OfflineStorageProgressWidget } from "../components/OfflineStorageProgressWidget";
+import { isFeatureEnabled } from "../features.config";
+import { MaintenanceStub } from "../components/MaintenanceStub";
 
 export function parseRobustJsonArray(rawText: string): any[] {
   let cleaned = rawText.trim();
@@ -453,6 +455,8 @@ export default function StudentDashboard() {
   const profileFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (!isFeatureEnabled("ENABLE_ACHIEVEMENTS")) return;
+
     const unsub = onSnapshot(
       doc(db, "system_config/app_download"),
       (docSnap) => {
@@ -635,6 +639,8 @@ export default function StudentDashboard() {
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!isFeatureEnabled("ENABLE_HISTORY")) return;
+
     const q = query(
       collection(db, "global_activity_feed"),
       orderBy("timestamp", "desc"),
@@ -1145,7 +1151,7 @@ export default function StudentDashboard() {
   // Listen for real-time changes to the users collection (leaderboard & points sync)
   const unsubUsersRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isFeatureEnabled("ENABLE_RANKING")) return;
     if (unsubUsersRef.current) unsubUsersRef.current();
     try {
       const q = query(
@@ -2493,19 +2499,20 @@ export default function StudentDashboard() {
                 label: "Góc Học Tập",
                 icon: BookOpen,
                 bubble: remindLaterCount > 0,
+                enabled: true,
               },
-              { id: "all_sets", label: "Bộ Học", icon: Library },
-              { id: "create_deck", label: "Tạo Bộ Thẻ", icon: Plus },
-              { id: "shop", label: "Chợ Vật Phẩm", icon: ShoppingBag },
-              { id: "app_download", label: "Tải App", icon: Download },
-              { id: "ranking", label: "Xếp Hạng", icon: MarcusAureliusIcon },
-              { id: "skill_tree", label: "Lộ Trình", icon: Network },
-              { id: "cyberpunk", label: "Cinematic Room", icon: Sparkles },
-              { id: "achievements", label: "Thành Tựu", icon: Award },
-              { id: "history", label: "Lịch Sử", icon: Activity },
-              { id: "profile", label: "Hồ Sơ", icon: User },
-              { id: "settings", label: "Cài Đặt", icon: Settings },
-            ].map((tab) => {
+              { id: "all_sets", label: "Bộ Học", icon: Library, enabled: true },
+              { id: "create_deck", label: "Tạo Bộ Thẻ", icon: Plus, enabled: true },
+              { id: "shop", label: "Chợ Vật Phẩm", icon: ShoppingBag, enabled: isFeatureEnabled("ENABLE_ACHIEVEMENTS") },
+              { id: "app_download", label: "Tải App", icon: Download, enabled: true },
+              { id: "ranking", label: "Xếp Hạng", icon: MarcusAureliusIcon, enabled: isFeatureEnabled("ENABLE_RANKING") },
+              { id: "skill_tree", label: "Lộ Trình", icon: Network, enabled: isFeatureEnabled("ENABLE_SKILL_TREE") },
+              { id: "cyberpunk", label: "Cinematic Room", icon: Sparkles, enabled: isFeatureEnabled("ENABLE_CYBERPUNK") },
+              { id: "achievements", label: "Thành Tựu", icon: Award, enabled: isFeatureEnabled("ENABLE_ACHIEVEMENTS") },
+              { id: "history", label: "Lịch Sử", icon: Activity, enabled: isFeatureEnabled("ENABLE_HISTORY") },
+              { id: "profile", label: "Hồ Sơ", icon: User, enabled: true },
+              { id: "settings", label: "Cài Đặt", icon: Settings, enabled: true },
+            ].filter(t => t.enabled).map((tab) => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
               return (
