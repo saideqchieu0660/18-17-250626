@@ -174,7 +174,7 @@ export function ServiceMonitor({
         usageCount: Math.floor(Math.random() * 1200) + 100,
         errorCount: isFailed ? Math.floor(Math.random() * 50) + 10 : Math.floor(Math.random() * 5),
         lastUsed: new Date().toISOString(),
-        providerLabel: "Legacy API Key"
+        providerLabel: "Ghost-Simulation-Node"
       };
     });
   });
@@ -1075,7 +1075,7 @@ export function ServiceMonitor({
               >
                 <div className="space-y-1 pr-4">
                   <div className="font-bold text-sm text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-blue-500" /> Google Gemini Pool
+                    <Cpu className="w-4 h-4 text-blue-500" /> Google AI Studio Pool
                   </div>
                   <div className="text-[11px] text-zinc-500">
                     {geminiEnabled
@@ -1154,8 +1154,7 @@ export function ServiceMonitor({
               >
                 <div className="space-y-1 pr-4">
                   <div className="font-bold text-sm text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
-                    <Server className="w-4 h-4 text-emerald-500" /> OpenRouter
-                    Llama Pool
+                    <Server className="w-4 h-4 text-emerald-500" /> OpenRouter Edge Pool
                   </div>
                   <div className="text-[11px] text-zinc-500">
                     {openRouterEnabled
@@ -1336,21 +1335,21 @@ export function ServiceMonitor({
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[
-                 ...keys.map(k => ({ ...k, providerLabel: "Google Cloud Studio Key" })),
-                 ...groqKeys.map(k => ({ ...k, providerLabel: "Cerebras Premium Key" })),
-                 ...openRouterKeys.map(k => ({ ...k, providerLabel: "OpenRouter Multi-Key" })),
-                 ...deepInfraKeys.map(k => ({ ...k, providerLabel: "DeepInfra Backup Key" })),
+                 ...keys.map(k => ({ ...k, providerLabel: "Google-Cloud-Studio-Node-B2" })),
+                 ...groqKeys.map(k => ({ ...k, providerLabel: "Cerebras-Compute-Cluster-A1" })),
+                 ...openRouterKeys.map(k => ({ ...k, providerLabel: "OpenRouter-Multi-Node-X" })),
+                 ...deepInfraKeys.map(k => ({ ...k, providerLabel: "DeepInfra-Fallback-Node-Z" })),
                  ...mockKeys
               ].sort((a, b) => ((a.index * 13) % 100) - ((b.index * 13) % 100)).map((k) => {
                  let ringColor = "border-zinc-200 dark:border-zinc-800";
-                 if (k.providerLabel === "Cerebras Premium Key" && k.index === currentGroqIndex) ringColor = "ring-2 ring-orange-500 border-orange-500";
-                 if (k.providerLabel === "Google Cloud Studio Key" && k.index === currentIndex) ringColor = "ring-2 ring-blue-500 border-blue-500";
-                 if (k.providerLabel === "OpenRouter Multi-Key" && k.index === currentOpenRouterIndex) ringColor = "ring-2 ring-emerald-500 border-emerald-500";
+                 if (k.providerLabel === "Cerebras-Compute-Cluster-A1" && k.index === currentGroqIndex) ringColor = "ring-2 ring-orange-500 border-orange-500";
+                 if (k.providerLabel === "Google-Cloud-Studio-Node-B2" && k.index === currentIndex) ringColor = "ring-2 ring-blue-500 border-blue-500";
+                 if (k.providerLabel === "OpenRouter-Multi-Node-X" && k.index === currentOpenRouterIndex) ringColor = "ring-2 ring-emerald-500 border-emerald-500";
                  
-                 const historyData = k.providerLabel === "Legacy API Key" 
+                 const historyData = k.providerLabel === "Ghost-Simulation-Node" 
                       ? (usageHistory[k.index] || Array(20).fill(0))
-                      : k.providerLabel === "Cerebras Premium Key" ? (usageHistory[k.index + 200] || Array(20).fill(0))
-                      : k.providerLabel === "OpenRouter Multi-Key" ? (usageHistory[k.index + 100] || Array(20).fill(0))
+                      : k.providerLabel === "Cerebras-Compute-Cluster-A1" ? (usageHistory[k.index + 200] || Array(20).fill(0))
+                      : k.providerLabel === "OpenRouter-Multi-Node-X" ? (usageHistory[k.index + 100] || Array(20).fill(0))
                       : (usageHistory[k.index] || Array(20).fill(0));
 
                  return (
