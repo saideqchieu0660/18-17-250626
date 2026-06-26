@@ -155,10 +155,10 @@ let googleServiceAccountStatus = initializeFirebaseAdmin();
 // Helper to securely escalate profile role from backend
 
 const GEMINI_KEYS = Object.keys(process.env)
-  .filter(key => key.startsWith('GEMINI_API_KEY_'))
+  .filter(key => key.startsWith('GEMINI_API_KEY_') || key.startsWith('VITE_GOOGLE_KEY_'))
   .sort((a, b) => {
-    const numA = parseInt(a.replace('GEMINI_API_KEY_', '')) || 0;
-    const numB = parseInt(b.replace('GEMINI_API_KEY_', '')) || 0;
+    const numA = parseInt(a.replace(/^(GEMINI_API_KEY_|VITE_GOOGLE_KEY_)/, '')) || 0;
+    const numB = parseInt(b.replace(/^(GEMINI_API_KEY_|VITE_GOOGLE_KEY_)/, '')) || 0;
     return numA - numB;
   })
   .map(key => process.env[key])
@@ -167,6 +167,9 @@ const GEMINI_KEYS = Object.keys(process.env)
 // Fallback to GEMINI_API_KEY if no numbered keys found
 if (GEMINI_KEYS.length === 0 && process.env.GEMINI_API_KEY) {
     GEMINI_KEYS.push(process.env.GEMINI_API_KEY);
+}
+if (GEMINI_KEYS.length === 0 && process.env.VITE_GOOGLE_KEY) {
+    GEMINI_KEYS.push(process.env.VITE_GOOGLE_KEY);
 }
 
 interface KeyState {
@@ -192,12 +195,12 @@ const geminiKeyStates: KeyState[] = GEMINI_KEYS.map((key, i) => ({
 
 let currentKeyIndex = Math.floor(Math.random() * Math.max(1, geminiKeyStates.length));
 
-// Dynamic Groq API Key Coordinator and Status Tracker
+// Dynamic Groq/Cerebras API Key Coordinator and Status Tracker
 const GROQ_KEYS = Object.keys(process.env)
-  .filter(key => key.startsWith('GROQ_API_KEY_'))
+  .filter(key => key.startsWith('GROQ_API_KEY_') || key.startsWith('VITE_CEREBRAS_KEY_'))
   .sort((a, b) => {
-    const numA = parseInt(a.replace('GROQ_API_KEY_', '')) || 0;
-    const numB = parseInt(b.replace('GROQ_API_KEY_', '')) || 0;
+    const numA = parseInt(a.replace(/^(GROQ_API_KEY_|VITE_CEREBRAS_KEY_)/, '')) || 0;
+    const numB = parseInt(b.replace(/^(GROQ_API_KEY_|VITE_CEREBRAS_KEY_)/, '')) || 0;
     return numA - numB;
   })
   .map(key => process.env[key])
@@ -208,6 +211,9 @@ if (GROQ_KEYS.length === 0 && process.env.GROQ_API_KEY) {
 }
 if (GROQ_KEYS.length === 0 && process.env.VITE_GROQ_API_KEY) {
   GROQ_KEYS.push(process.env.VITE_GROQ_API_KEY);
+}
+if (GROQ_KEYS.length === 0 && process.env.VITE_CEREBRAS_KEY) {
+  GROQ_KEYS.push(process.env.VITE_CEREBRAS_KEY);
 }
 
 // Fallback to beautiful default simulated pool if environment is completely empty
@@ -259,6 +265,12 @@ let isOpenRouterEnabled = true;
 let isGroqEnabled = true;
 let isGeminiEnabled = true;
 let isDeepInfraEnabled = true;
+
+// Provider toggle aliases for explicit clarity
+const ENABLE_OPENROUTER = () => isOpenRouterEnabled;
+const ENABLE_CEREBRAS = () => isGroqEnabled;
+const ENABLE_GOOGLE = () => isGeminiEnabled;
+
 let lastConfigFetchTime = 0;
 
 async function refreshApiToggles() {
@@ -1063,8 +1075,38 @@ function handleGroqError(state: KeyState, err: any) {
 
 let generateContentGlobalProviderIndex = 0;
 
+const providerThrottleStates: Record<string, number> = {
+  gemini: 0,
+  groq: 0,
+  openrouter: 0
+};
+
 async function executeGenerateContentRoundRobin(contents: any, config: any = {}): Promise<string> {
   const isJsonMode = config.responseMimeType === "application/json";
+  
+  let promptText = "";
+  if (typeof contents === "string") {
+    promptText = contents;
+  } else if (Array.isArray(contents)) {
+    promptText = contents.map(c => {
+       if (c.text) return c.text;
+       if (c.inlineData) return "[Image data attached - Supported on Gemini only]";
+       return JSON.stringify(c);
+    }).join("\n");
+  }
+
+  // --- CONTENT SAFETY & PROHIBITED KEYWORD FILTER ---
+  const forbiddenKeywords = [
+    "hack", "exploit", "bypass", "malware", "virus", "phishing",
+    "nsfw", "porn", "violence", "kill", "murder", "suicide"
+  ];
+  const promptLower = promptText.toLowerCase();
+  for (const keyword of forbiddenKeywords) {
+    if (promptLower.includes(keyword)) {
+      throw new Error(`[Content Safety] Request blocked due to prohibited keyword: ${keyword}.`);
+    }
+  }
+  
   let activeProviders: string[] = [];
   if (isGeminiEnabled && geminiKeyStates.length > 0) activeProviders.push("gemini");
   if (isGroqEnabled && groqKeyStates.length > 0) activeProviders.push("groq");
@@ -1086,35 +1128,38 @@ async function executeGenerateContentRoundRobin(contents: any, config: any = {})
   let responseText = "";
   let finalError;
 
-  let promptText = "";
-  if (typeof contents === "string") {
-    promptText = contents;
-  } else if (Array.isArray(contents)) {
-    promptText = contents.map(c => {
-       if (c.text) return c.text;
-       if (c.inlineData) return "[Image data attached - Supported on Gemini only]";
-       return JSON.stringify(c);
-    }).join("\n");
-  }
-
   const numProviders = activeProviders.length;
   for (let pIdx = 0; pIdx < numProviders; pIdx++) {
     const providerIndex = (startProviderIndex + pIdx) % numProviders;
     const provider = activeProviders[providerIndex];
 
+    // --- HARD THROTTLING DELAY (10-12s) ---
+    const now = Date.now();
+    const lastTime = providerThrottleStates[provider] || 0;
+    if (now - lastTime < 10000) {
+      // Cooldown window active, smoothly shift to the next available provider
+      console.log(`[Throttle Lock] Provider ${provider} is cooling down. Shifting to next...`);
+      continue;
+    }
+    const throttleDelay = Math.floor(Math.random() * 2000) + 10000; // 10s to 12s
+    providerThrottleStates[provider] = now + throttleDelay;
+
     try {
+
       if (provider === "groq") {
         const numKeys = groqKeyStates.length;
         for (let kIdx = 0; kIdx < numKeys; kIdx++) {
           const { key, state } = getGroqKey();
+          // Jitter Delay: 200ms to 600ms to prevent bot-detection
+          await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 400) + 200));
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000);
           try {
-            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
               body: JSON.stringify({
-                model: "llama-3.3-70b-versatile",
+                model: "llama3.1-8b",
                 messages: [
                    ...(config.systemInstruction ? [{ role: "system", content: config.systemInstruction }] : []),
                    { role: "user", content: promptText }
@@ -1142,6 +1187,8 @@ async function executeGenerateContentRoundRobin(contents: any, config: any = {})
         const numKeys = openRouterKeyStates.length;
         for (let kIdx = 0; kIdx < numKeys; kIdx++) {
           const { key, state } = getOpenRouterKey();
+          // Jitter Delay: 200ms to 600ms to prevent bot-detection
+          await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 400) + 200));
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000);
           try {
@@ -1179,6 +1226,8 @@ async function executeGenerateContentRoundRobin(contents: any, config: any = {})
         }
       } else if (provider === "gemini") {
         try {
+           // Jitter Delay: 200ms to 600ms to prevent bot-detection
+           await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 400) + 200));
            responseText = await executeGeminiWithRetry(async (ai) => {
               const res = await ai.models.generateContent({
                  model: "gemini-2.5-flash",
@@ -1280,6 +1329,18 @@ app.post("/api/proxy/openrouter", async (req, res, next) => {
       return res.status(400).json({ error: "Messages array is required" });
     }
 
+    // --- CONTENT SAFETY & PROHIBITED KEYWORD FILTER ---
+    const forbiddenKeywords = [
+      "hack", "exploit", "bypass", "malware", "virus", "phishing",
+      "nsfw", "porn", "violence", "kill", "murder", "suicide"
+    ];
+    const promptText = messages.map((m: any) => m.content).join(" ").toLowerCase();
+    for (const keyword of forbiddenKeywords) {
+      if (promptText.includes(keyword)) {
+        return res.status(403).json({ error: `[Content Safety] Request blocked due to prohibited keyword: ${keyword}.` });
+      }
+    }
+
     if (openRouterKeyStates.length === 0) {
       return res.status(503).json({ error: "OpenRouter is not configured on this server" });
     }
@@ -1288,6 +1349,15 @@ app.post("/api/proxy/openrouter", async (req, res, next) => {
     if (targetModel === "meta-llama/llama-3-8b-instruct:free") {
       targetModel = "meta-llama/llama-3.1-8b-instruct:free";
     }
+
+    // --- HARD THROTTLING DELAY (10-12s) ---
+    const now = Date.now();
+    const lastTime = providerThrottleStates["openrouter"] || 0;
+    if (now - lastTime < 10000) {
+      return res.status(429).json({ error: "OpenRouter provider pool is currently cooling down to prevent rate limits. Please try another provider or wait 10 seconds." });
+    }
+    const throttleDelay = Math.floor(Math.random() * 2000) + 10000;
+    providerThrottleStates["openrouter"] = now + throttleDelay;
 
     let attempts = 0;
     const maxAttempts = Math.max(2, openRouterKeyStates.length);

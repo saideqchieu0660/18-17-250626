@@ -56,6 +56,20 @@ export default async function handler(req: Request) {
   const model = payload.model || "openai/gpt-oss-120b:free";
   const temperature = payload.temperature ?? 0.7;
 
+  // --- CONTENT SAFETY & PROHIBITED KEYWORD FILTER ---
+  if (messages && Array.isArray(messages)) {
+    const forbiddenKeywords = [
+      "hack", "exploit", "bypass", "malware", "virus", "phishing",
+      "nsfw", "porn", "violence", "kill", "murder", "suicide"
+    ];
+    const promptText = messages.map((m: any) => m.content).join(" ").toLowerCase();
+    for (const keyword of forbiddenKeywords) {
+      if (promptText.includes(keyword)) {
+        return new Response(JSON.stringify({ error: `[Content Safety] Request blocked due to prohibited keyword: ${keyword}.` }), { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+    }
+  }
+
   // Lấy danh sách pool key
   const OPENROUTER_KEYS: string[] = [];
   for (let i = 1; i <= 9; i++) {

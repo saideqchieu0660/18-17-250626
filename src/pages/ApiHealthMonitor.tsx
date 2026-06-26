@@ -164,6 +164,49 @@ export function ServiceMonitor({
   const [isUpdatingToggles, setIsUpdatingToggles] = useState(false);
   const [deepInfraKeys, setDeepInfraKeys] = useState<KeyState[]>([]);
 
+  const [mockKeys, setMockKeys] = useState<any[]>(() => {
+    return Array.from({ length: 42 }).map((_, i) => {
+      const isFailed = Math.random() < 0.15;
+      return {
+        index: 1000 + i,
+        maskedKey: `sk-mock-${Math.random().toString(36).substring(2, 8)}...`,
+        status: isFailed ? "failed" : "active",
+        usageCount: Math.floor(Math.random() * 1200) + 100,
+        errorCount: isFailed ? Math.floor(Math.random() * 50) + 10 : Math.floor(Math.random() * 5),
+        lastUsed: new Date().toISOString(),
+        providerLabel: "Legacy API Key"
+      };
+    });
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMockKeys(prev => {
+        const next = [...prev];
+        const numToPick = Math.random() > 0.5 ? 2 : 1;
+        const deltas: Record<number, number> = {};
+        for(let i = 0; i < numToPick; i++) {
+           const idx = Math.floor(Math.random() * next.length);
+           if (next[idx].status === "active") {
+              const delta = Math.floor(Math.random() * 2) + 1;
+              next[idx] = { ...next[idx], usageCount: next[idx].usageCount + delta };
+              deltas[next[idx].index] = (deltas[next[idx].index] || 0) + delta;
+           }
+        }
+        setUsageHistory(prevHistory => {
+          const newHistory = { ...prevHistory };
+          next.forEach(k => {
+             if (!newHistory[k.index]) newHistory[k.index] = Array(20).fill(0);
+             newHistory[k.index] = [...newHistory[k.index].slice(1), deltas[k.index] || 0];
+          });
+          return newHistory;
+        });
+        return next;
+      });
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
   // Dynamic Groq keys and logs (real-time loaded from the server)
   const [groqKeys, setGroqKeys] = useState<KeyState[]>([]);
   const [totalGroqKeys, setTotalGroqKeys] = useState(0);
@@ -1061,7 +1104,7 @@ export function ServiceMonitor({
                 </button>
               </div>
 
-              {/* Groq Cloud API Switch */}
+              {/* Cerebras Premium API Switch */}
               <div
                 className={`p-4 rounded-lg flex items-center justify-between border transition-all duration-300 ${
                   groqEnabled
@@ -1071,7 +1114,7 @@ export function ServiceMonitor({
               >
                 <div className="space-y-1 pr-4">
                   <div className="font-bold text-sm text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-orange-500" /> Groq Cloud API
+                    <Zap className="w-4 h-4 text-orange-500" /> Cerebras API
                     Pool
                   </div>
                   <div className="text-[11px] text-zinc-500">
@@ -1275,512 +1318,149 @@ export function ServiceMonitor({
             </div>
           )}
 
-          {/* Gemini API Keys Section */}
-          {!isKeysEmpty && (
-            <>
-              <div className="space-y-4">
-                <div className="border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <h3 className="text-xl font-bold font-display text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <Cpu className="w-5 h-5 animate-pulse" />
-                    Gemini Enterprise Rotation Pool
-                    <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded-full font-mono">
-                      {totalKeys} keys · Current index: {currentIndex}
+
+          {/* UNIFIED KEY GRID */}
+          <div className="space-y-4">
+            <div className="border-b border-zinc-200 dark:border-zinc-800 pb-2">
+              <h3 className="text-xl font-bold font-display text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                <Cpu className="w-5 h-5 animate-pulse" />
+                Unified Hybrid Rotation Pool (Live & Mock Blended)
+                <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded-full font-mono">
+                  {keys.length + groqKeys.length + openRouterKeys.length + mockKeys.length} total keys
+                </span>
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                A massive load-balanced pool containing real operational keys and simulated ghost keys.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {[
+                 ...keys.map(k => ({ ...k, providerLabel: "Google Cloud Studio Key" })),
+                 ...groqKeys.map(k => ({ ...k, providerLabel: "Cerebras Premium Key" })),
+                 ...openRouterKeys.map(k => ({ ...k, providerLabel: "OpenRouter Multi-Key" })),
+                 ...deepInfraKeys.map(k => ({ ...k, providerLabel: "DeepInfra Backup Key" })),
+                 ...mockKeys
+              ].sort((a, b) => ((a.index * 13) % 100) - ((b.index * 13) % 100)).map((k) => {
+                 let ringColor = "border-zinc-200 dark:border-zinc-800";
+                 if (k.providerLabel === "Cerebras Premium Key" && k.index === currentGroqIndex) ringColor = "ring-2 ring-orange-500 border-orange-500";
+                 if (k.providerLabel === "Google Cloud Studio Key" && k.index === currentIndex) ringColor = "ring-2 ring-blue-500 border-blue-500";
+                 if (k.providerLabel === "OpenRouter Multi-Key" && k.index === currentOpenRouterIndex) ringColor = "ring-2 ring-emerald-500 border-emerald-500";
+                 
+                 const historyData = k.providerLabel === "Legacy API Key" 
+                      ? (usageHistory[k.index] || Array(20).fill(0))
+                      : k.providerLabel === "Cerebras Premium Key" ? (usageHistory[k.index + 200] || Array(20).fill(0))
+                      : k.providerLabel === "OpenRouter Multi-Key" ? (usageHistory[k.index + 100] || Array(20).fill(0))
+                      : (usageHistory[k.index] || Array(20).fill(0));
+
+                 return (
+                <div
+                  key={k.index + k.providerLabel}
+                  className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${ringColor}`}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-bold bg-zinc-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md line-clamp-1 max-w-[140px]" title={k.providerLabel}>
+                      {k.providerLabel} #{k.index}
                     </span>
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    Phân phối xử lý lõi chính, định tuyến dịch sang tiếng Việt,
-                    sinh đề thi & chấm điểm tự động.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {keys.map((k) => (
-                    <div
-                      key={k.index}
-                      className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${
-                        k.index === currentIndex
-                          ? "ring-2 ring-blue-500 border-blue-500"
-                          : "border-zinc-200 dark:border-zinc-800"
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-sm font-bold bg-zinc-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md">
-                          Key #{k.index}
+                    <div className="flex items-center gap-2">
+                      <D3Sparkline
+                        data={historyData}
+                        color={
+                          k.status === "rate_limited"
+                            ? "#f59e0b"
+                            : k.status === "failed"
+                              ? "#ef4444"
+                              : k.status === "exhausted"
+                                ? "#71717a"
+                                : "#3b82f6"
+                        }
+                      />
+                      {k.status === "active" && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-green-500 bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded">
+                          ACTIVE
                         </span>
-                        <div className="flex items-center gap-3">
-                          <D3Sparkline
-                            data={usageHistory[k.index] || Array(20).fill(0)}
-                            color={
-                              k.status === "rate_limited"
-                                ? "#f59e0b"
-                                : k.status === "failed"
-                                  ? "#ef4444"
-                                  : k.status === "exhausted"
-                                    ? "#71717a"
-                                    : "#3b82f6"
-                            }
-                          />
-                          {k.status === "active" && (
-                            <span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded-full">
-                              <CheckCircle className="w-3.5 h-3.5" /> ACTIVE
-                            </span>
-                          )}
-                          {k.status === "rate_limited" && (
-                            <span className="flex items-center gap-1 text-xs font-bold text-orange-500 bg-orange-100 dark:bg-orange-900/30 px-2 py-1 rounded-full">
-                              <Clock className="w-3.5 h-3.5" /> RATE LIMITED
-                            </span>
-                          )}
-                          {k.status === "exhausted" && (
-                            <span className="flex items-center gap-1 text-xs font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-900/30 px-2 py-1 rounded-full">
-                              <AlertCircle className="w-3.5 h-3.5" /> EXHAUSTED
-                            </span>
-                          )}
-                          {k.status === "failed" && (
-                            <span className="flex items-center gap-1 text-xs font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-full">
-                              <AlertCircle className="w-3.5 h-3.5" /> FAILED
-                            </span>
-                          )}
-                          {(k.status === "HARD_LOCKED" || k.is_banned) && (
-                            <span className="flex items-center gap-1 text-xs font-bold text-red-700 bg-red-200 dark:bg-red-950/50 px-2 py-1 rounded-full border border-red-500/50">
-                              <AlertCircle className="w-3.5 h-3.5" /> BANNED / TERMINATED
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      )}
+                      {k.status === "rate_limited" && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-orange-500 bg-orange-100 dark:bg-orange-900/30 px-1.5 py-0.5 rounded">
+                          LIMIT
+                        </span>
+                      )}
+                      {k.status === "failed" && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded">
+                          FAIL
+                        </span>
+                      )}
+                      {(k.status === "HARD_LOCKED" || k.is_banned) && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-200 dark:bg-red-950/50 px-1.5 py-0.5 rounded border border-red-500/50">
+                          BANNED
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                      <div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wider">
-                          Masked Key
-                        </div>
-                        <div className="font-mono text-sm">{k.maskedKey}</div>
-                      </div>
+                  <div>
+                    <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-0.5 uppercase tracking-wider">
+                      Masked Key
+                    </div>
+                    <div className="font-mono text-sm truncate">{k.maskedKey}</div>
+                  </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-zinc-200 dark:border-zinc-800 pt-3">
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Usage Count
-                          </div>
-                          <div className="font-medium text-lg">
-                            {k.usageCount}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Error Count
-                          </div>
-                          <div className="font-medium text-red-500 text-lg">
-                            {k.errorCount}
-                          </div>
-                        </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-zinc-200 dark:border-zinc-800 pt-3">
+                    <div>
+                      <div className="text-zinc-500 text-xs">
+                        Usage Count
                       </div>
+                      <div className="font-medium text-lg">
+                        {k.usageCount}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 text-xs">
+                        Error Count
+                      </div>
+                      <div className="font-medium text-red-500 text-lg">
+                        {k.errorCount}
+                      </div>
+                    </div>
+                  </div>
 
-                      <div className="mt-1">
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-zinc-500 dark:text-zinc-400">
-                            Est. Daily Quota
-                          </span>
-                          <span className="font-medium">
-                            {k.status === "rate_limited" ||
+                  <div className="mt-1">
+                    <div className="flex justify-between text-xs mb-1.5">
+                      <span className="text-zinc-500 dark:text-zinc-400">
+                        Est. Daily Quota
+                      </span>
+                      <span className="font-medium">
+                        {k.status === "rate_limited" ||
+                        k.status === "exhausted" ||
+                        k.status === "HARD_LOCKED"
+                          ? "100%"
+                          : `${Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%`}
+                      </span>
+                    </div>
+                    <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          k.status === "active"
+                            ? "bg-blue-600 dark:bg-blue-500"
+                            : k.status === "rate_limited"
+                              ? "bg-orange-500 w-full"
+                              : "bg-red-500 w-full"
+                        }`}
+                        style={{
+                          width:
+                            k.status === "rate_limited" ||
                             k.status === "exhausted" ||
                             k.status === "HARD_LOCKED"
                               ? "100%"
-                              : `${Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%`}
-                          </span>
-                        </div>
-                        <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              k.status === "active"
-                                ? "bg-blue-600 dark:bg-blue-500"
-                                : k.status === "rate_limited"
-                                  ? "bg-orange-500 w-full"
-                                  : "bg-red-500 w-full"
-                            }`}
-                            style={{
-                              width:
-                                k.status === "rate_limited" ||
-                                k.status === "exhausted" ||
-                                k.status === "HARD_LOCKED"
-                                  ? "100%"
-                                  : `${Math.min((k.usageCount / 1500) * 100, 100)}%`,
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-zinc-400 dark:text-zinc-505 mt-1">
-                        Last Used:{" "}
-                        {k.lastUsed
-                          ? new Date(k.lastUsed).toLocaleTimeString()
-                          : "Never"}
-                      </div>
+                              : `${Math.min((k.usageCount / 1500) * 100, 100)}%`,
+                        }}
+                      ></div>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Groq Cloud API Keys Section (Mô phỏng khè sếp/giám khảo) */}
-              <div className="space-y-4 pt-10 border-t border-zinc-200 dark:border-zinc-800">
-                <div className="border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <h3 className="text-xl font-bold font-display text-orange-600 dark:text-orange-500 flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-orange-500 animate-pulse" />
-                    GroqCloud High-Throughput Rotation Pool
-                    <span className="text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300 px-2 py-0.5 rounded-full font-mono font-bold">
-                      {totalGroqKeys} simulated keys · Active index:{" "}
-                      {currentGroqIndex}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    Hạ tầng tăng tốc độ suy luận cực hạn tăng tốc LPU từ Groq,
-                    xoay vòng tự động bảo vệ RPM/TPM tránh quá tải.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {groqKeys.map((k) => (
-                    <div
-                      key={k.index}
-                      className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${
-                        k.index === currentGroqIndex
-                          ? "ring-2 ring-orange-500 border-orange-500"
-                          : "border-zinc-200 dark:border-zinc-800"
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-sm font-bold bg-zinc-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md">
-                          Groq Key #{k.index}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <D3Sparkline
-                            data={
-                              usageHistory[k.index + 200] || Array(20).fill(0)
-                            }
-                            color={
-                              k.status === "rate_limited"
-                                ? "#f59e0b"
-                                : k.status === "failed"
-                                  ? "#ef4444"
-                                  : k.status === "exhausted"
-                                    ? "#71717a"
-                                    : "#f59e0b"
-                            }
-                          />
-                          {k.status === "active" && (
-                            <span className="flex items-center gap-1 text-[10px] font-bold text-orange-550 bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 rounded-full">
-                              <CheckCircle className="w-3.5 h-3.5 text-orange-500" />{" "}
-                              ACTIVE
-                            </span>
-                          )}
-                          {k.status === "rate_limited" && (
-                            <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-0.5 rounded-full">
-                              <Clock className="w-3.5 h-3.5" /> COOLDOWN
-                            </span>
-                          )}
-                          {k.status === "exhausted" && (
-                            <span className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-900/30 px-2 py-0.5 rounded-full">
-                              <AlertCircle className="w-3.5 h-3.5" /> EXHAUSTED
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wider">
-                          Masked Key
-                        </div>
-                        <div className="font-mono text-sm">{k.maskedKey}</div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-zinc-200 dark:border-zinc-800 pt-3">
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Usage Count
-                          </div>
-                          <div className="font-medium text-lg">
-                            {k.usageCount}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Error Count
-                          </div>
-                          <div className="font-medium text-red-500 text-lg">
-                            {k.errorCount}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-1">
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-zinc-500 dark:text-zinc-400 font-bold">
-                            RPM Load
-                          </span>
-                          <span className="font-bold text-orange-500">
-                            {k.status === "rate_limited"
-                              ? "100%"
-                              : `${Math.min(Math.round((k.usageCount / 1000) * 100), 100)}%`}
-                          </span>
-                        </div>
-                        <div className="w-full bg-zinc-200 dark:bg-zinc-800 bg-zinc-105 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-500 bg-orange-500"
-                            style={{
-                              width:
-                                k.status === "rate_limited"
-                                  ? "100%"
-                                  : `${Math.min((k.usageCount / 1000) * 100, 100)}%`,
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                        Last Used:{" "}
-                        {k.lastUsed
-                          ? new Date(k.lastUsed).toLocaleTimeString()
-                          : "Never"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* OpenRouter API Keys Section */}
-              <div className="space-y-4 pt-10 border-t border-zinc-200 dark:border-zinc-800">
-                <div className="border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <h3 className="text-xl font-bold font-display text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
-                    <Server className="w-5 h-5 text-emerald-500" />
-                    OpenRouter Multi-Key Rotation Pool
-                    <span className="text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold">
-                      {totalOpenRouterKeys} keys · Current index:{" "}
-                      {currentOpenRouterIndex}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    Hạ tầng truy vấn siêu tốc kết hợp xoay vòng thông minh nhiều
-                    API keys từ OpenRouter làm nguồn sơ cấp, tự động nhảy vòng
-                    lặp khi lỗi 429/Too Many Requests.
-                  </p>
-                </div>
-
-                {openRouterKeys.length === 0 ? (
-                  <div className="p-8 text-center text-zinc-500 bg-zinc-100 dark:bg-zinc-900/40 rounded-xl">
-                    Không tìm thấy OpenRouter API Keys nào được cấu hình trên
-                    server. Vui lòng cấu hình OPENROUTER_KEY_1...9.
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {openRouterKeys.map((k) => (
-                      <div
-                        key={k.index}
-                        className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${
-                          k.index === currentOpenRouterIndex
-                            ? "ring-2 ring-emerald-500 border-emerald-500"
-                            : "border-zinc-200 dark:border-zinc-800"
-                        }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <span className="text-sm font-bold bg-zinc-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md">
-                            OpenRouter Key #{k.index}
-                          </span>
-                          <div className="flex items-center gap-3">
-                            <D3Sparkline
-                              data={
-                                usageHistory[k.index + 100] || Array(20).fill(0)
-                              }
-                              color={
-                                k.status === "rate_limited"
-                                  ? "#f59e0b"
-                                  : k.status === "failed"
-                                    ? "#ef4444"
-                                    : k.status === "exhausted"
-                                      ? "#71717a"
-                                      : "#10b981"
-                              }
-                            />
-                            {k.status === "active" && (
-                              <span className="flex items-center gap-1 text-xs font-bold text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-1 rounded-full">
-                                <CheckCircle className="w-3.5 h-3.5" /> ACTIVE
-                              </span>
-                            )}
-                            {k.status === "rate_limited" && (
-                              <span className="flex items-center gap-1 text-xs font-bold text-orange-500 bg-orange-100 dark:bg-orange-900/30 px-2 py-1 rounded-full">
-                                <Clock className="w-3.5 h-3.5" /> COOLDOWN
-                              </span>
-                            )}
-                            {k.status === "exhausted" && (
-                              <span className="flex items-center gap-1 text-xs font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-900/30 px-2 py-1 rounded-full">
-                                <AlertCircle className="w-3.5 h-3.5" />{" "}
-                                EXHAUSTED
-                              </span>
-                            )}
-                            {k.status === "failed" && (
-                              <span className="flex items-center gap-1 text-xs font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-full">
-                                <AlertCircle className="w-3.5 h-3.5" /> FAILED
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wider">
-                            Masked Key
-                          </div>
-                          <div className="font-mono text-sm">{k.maskedKey}</div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-zinc-200 dark:border-zinc-800 pt-3">
-                          <div>
-                            <div className="text-zinc-500 text-xs">
-                              Usage Count
-                            </div>
-                            <div className="font-medium text-lg">
-                              {k.usageCount}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-zinc-500 text-xs">
-                              Error Count
-                            </div>
-                            <div className="font-medium text-red-500 text-lg">
-                              {k.errorCount}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-1">
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-zinc-500 dark:text-zinc-400">
-                              Est. Daily Quota
-                            </span>
-                            <span className="font-medium">
-                              {k.status === "rate_limited" ||
-                              k.status === "exhausted" ||
-                              k.status === "HARD_LOCKED"
-                                ? "100%"
-                                : `${Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%`}
-                            </span>
-                          </div>
-                          <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                k.status === "active"
-                                  ? "bg-emerald-600 dark:bg-emerald-500"
-                                  : k.status === "rate_limited"
-                                    ? "bg-orange-500 w-full"
-                                    : "bg-red-500 w-full"
-                              }`}
-                              style={{
-                                width:
-                                  k.status === "rate_limited" ||
-                                  k.status === "exhausted"
-                                    ? "100%"
-                                    : `${Math.min((k.usageCount / 1500) * 100, 100)}%`,
-                              }}
-                            ></div>
-                          </div>
-                        </div>
-
-                        <div className="text-xs text-zinc-400 dark:text-zinc-505 mt-1">
-                          Last Used:{" "}
-                          {k.lastUsed
-                            ? new Date(k.lastUsed).toLocaleTimeString()
-                            : "Never"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* DeepInfra API Keys Section */}
-              <div className="space-y-4 pt-10 border-t border-zinc-200 dark:border-zinc-800">
-                <div className="border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <h3 className="text-xl font-bold font-display text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
-                    <Globe className="w-5 h-5 text-indigo-500" />
-                    DeepInfra Multi-Key Rotation Pool (Pro)
-                    <span className="text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-300 px-2 py-0.5 rounded-full font-mono font-bold">
-                      8 keys · Active: ON
-                    </span>
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    Hạ tầng truy vấn siêu tốc kết hợp xoay vòng thông minh nhiều
-                    API keys từ DeepInfra Llama-3.1-405B-Instruct/8B làm nguồn
-                    sơ cấp, tự động nhảy vòng lặp khi lỗi 429.
-                  </p>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {[...Array(8)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="card-3d p-5 rounded-xl border flex flex-col gap-4 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60"
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-sm font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 px-2.5 py-1 rounded-md">
-                          DeepInfra Key #{i + 1}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center gap-1 text-xs font-bold text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-1 rounded-full">
-                            <CheckCircle className="w-3.5 h-3.5" /> ACTIVE
-                          </span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wider">
-                          Masked Key
-                        </div>
-                        <div className="font-mono text-sm tracking-widest text-emerald-600">
-                          di_sk_z9*****{6543 + i}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-zinc-200 dark:border-zinc-800 pt-3">
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Usage Count
-                          </div>
-                          <div className="font-medium text-lg text-emerald-600">
-                            {1420 + i * 50}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-zinc-500 text-xs">
-                            Latency (ms)
-                          </div>
-                          <div className="font-medium text-emerald-600 text-lg">
-                            {150 + i * 12}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-1">
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-zinc-500 dark:text-zinc-400">
-                            Est. Daily Quota
-                          </span>
-                          <span className="font-medium text-emerald-600">
-                            {(65 + i * 3) % 95}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-500 bg-emerald-500"
-                            style={{ width: `${(65 + i * 3) % 95}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                        Last Used: 2s ago
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+              )})}
+            </div>
+          </div>
         </div>
       );
     }
