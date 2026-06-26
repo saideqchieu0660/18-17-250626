@@ -173,7 +173,8 @@ interface KeyState {
   index: number;
   key: string;
   maskedKey: string;
-  status: "active" | "rate_limited" | "quota_exceeded" | "failed";
+  status: "active" | "rate_limited" | "quota_exceeded" | "failed" | "HARD_LOCKED";
+  is_banned?: boolean;
   errorCount: number;
   usageCount: number;
   lastUsed: Date | null;
@@ -484,6 +485,7 @@ function getGeminiClient(): { ai: any, state: KeyState } {
   // 1. Recover keys that have been rate limited for over 60 seconds
   const now = Date.now();
   geminiKeyStates.forEach(s => {
+    if (s.status === "HARD_LOCKED" || s.is_banned) return;
     if (s.status === "rate_limited" && s.lastUsed && (now - s.lastUsed.getTime() > 60000)) {
        s.status = "active";
        addRotationLog({
@@ -513,7 +515,7 @@ function getGeminiClient(): { ai: any, state: KeyState } {
 
   // 3. Fallback: If all active keys are exhausted or limited, try to pick first rate-limited LRU key
   if (!selectedState) {
-    const limitedKeys = geminiKeyStates.filter(s => s.status === "rate_limited");
+    const limitedKeys = geminiKeyStates.filter(s => s.status === "rate_limited" && s.status !== "HARD_LOCKED" && !s.is_banned);
     if (limitedKeys.length > 0) {
       limitedKeys.sort((a, b) => {
         if (!a.lastUsed) return -1;
@@ -522,8 +524,11 @@ function getGeminiClient(): { ai: any, state: KeyState } {
       });
       selectedState = limitedKeys[0];
     } else {
-      selectedState = geminiKeyStates[currentKeyIndex];
-      currentKeyIndex = (currentKeyIndex + 1) % geminiKeyStates.length;
+      const nonBannedKeys = geminiKeyStates.filter(s => s.status !== "HARD_LOCKED" && !s.is_banned);
+      if (nonBannedKeys.length === 0) {
+        throw new Error("All Gemini API keys are permanently BANNED or HARD_LOCKED.");
+      }
+      selectedState = nonBannedKeys[0];
     }
     
     addRotationLog({
@@ -561,23 +566,32 @@ function handleGeminiError(state: KeyState, err: any) {
   state.errorCount++;
   updateKeyMetrics(state.index, "error");
   const msg = err?.message || err?.toString() || "";
+  const errStatus = err?.status || err?.response?.status;
   
-  const isHardQuotaExceeded = msg.includes("quota") || msg.toLowerCase().includes("quota exceeded") || msg.toLowerCase().includes("exceeded your current quota") || msg.toLowerCase().includes("please check your plan and billing") || err?.status === 402 || err?.status === 403 || msg.includes("PERMISSION_DENIED");
+  const isHardQuotaExceeded = msg.includes("quota") || msg.toLowerCase().includes("quota exceeded") || msg.toLowerCase().includes("exceeded your current quota") || msg.toLowerCase().includes("please check your plan and billing") || errStatus === 402 || errStatus === 403 || errStatus === 401 || msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID");
   
   if (isHardQuotaExceeded) {
-    state.status = "quota_exceeded";
+    state.status = "HARD_LOCKED";
+    state.is_banned = true;
     addRotationLog({
       toKeyIndex: state.index,
-      reason: `Hard Quota/Billing/Permission Denied (Permanently disabled). Error: ${msg.substring(0, 100)}`
+      reason: `Hard-Locked (Terminal Ban/Quota/Billing). Error: ${msg.substring(0, 100)}`
     });
-  } else if (err?.status === 429 || msg.includes("429") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("limit exceed")) {
+    if (admin.apps.length > 0) {
+      try {
+        admin.firestore().collection('system_metrics').doc(`api_key_${state.index}`).set({
+          status: "HARD_LOCKED",
+          is_banned: true
+        }, { merge: true }).catch(console.error);
+      } catch (e) {}
+    }
+  } else if (errStatus === 429 || msg.includes("429") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("limit exceed")) {
     state.status = "rate_limited";
     addRotationLog({
       toKeyIndex: state.index,
       reason: `Rate Limited (429 cooling off). Error: ${msg.substring(0, 100)}`
     });
-  } else if (err?.status === 503 || msg.includes("503") || msg.includes("high demand") || msg.includes("overloaded")) {
-    // 503 often happens on specific models, marking as rate limited to force rotation
+  } else if (errStatus === 503 || msg.includes("503") || msg.includes("high demand") || msg.includes("overloaded")) {
     state.status = "rate_limited";
     addRotationLog({
       toKeyIndex: state.index,
@@ -806,6 +820,10 @@ function getOpenRouterKey(): { key: string; state: KeyState } {
   
   const now = Date.now();
   openRouterKeyStates.forEach(s => {
+    if (s.status === "HARD_LOCKED" || s.is_banned) {
+      // NEVER auto-recover hard locked keys
+      return;
+    }
     if ((s.status === "rate_limited" || s.status === "failed") && s.lastUsed && (now - s.lastUsed.getTime() > 120000)) {
        const oldStatus = s.status;
        s.status = "active";
@@ -823,6 +841,11 @@ function getOpenRouterKey(): { key: string; state: KeyState } {
   
   while (attempts < openRouterKeyStates.length) {
     const s = openRouterKeyStates[currentOpenRouterKeyIndex];
+    if (s.status === "HARD_LOCKED" || s.is_banned) {
+      currentOpenRouterKeyIndex = (currentOpenRouterKeyIndex + 1) % openRouterKeyStates.length;
+      attempts++;
+      continue;
+    }
     if (s.status === "active") {
         selectedState = s;
         break;
@@ -833,11 +856,15 @@ function getOpenRouterKey(): { key: string; state: KeyState } {
   }
 
   if (!selectedState) {
-    selectedState = openRouterKeyStates[currentOpenRouterKeyIndex];
+    const nonBannedKeys = openRouterKeyStates.filter(s => s.status !== "HARD_LOCKED" && !s.is_banned);
+    if (nonBannedKeys.length === 0) {
+      throw new Error("All OpenRouter API keys are permanently BANNED or HARD_LOCKED.");
+    }
+    selectedState = nonBannedKeys[0];
     addOpenRouterRotationLog({
        fromKeyIndex: originalIndex,
        toKeyIndex: selectedState.index,
-       reason: "All OpenRouter keys are cooling down. Forced fallback to current index."
+       reason: "All active OpenRouter keys are cooling down. Forced fallback to first non-banned key."
     });
   } else if (skippedIndices.length > 0) {
     addOpenRouterRotationLog({
@@ -861,7 +888,26 @@ function handleOpenRouterError(state: KeyState, err: any) {
   state.errorCount++;
   updateKeyMetrics(state.index + 100, "error"); // +100 offset
   const msg = err?.message || err?.toString() || "";
-  if (err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("limit exceed")) {
+  const errStatus = err?.status || err?.response?.status;
+  
+  if (errStatus === 401 || errStatus === 403 || msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("invalid api key") || msg.toLowerCase().includes("suspended") || msg.toLowerCase().includes("banned") || msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("unauthorized")) {
+     state.status = "HARD_LOCKED";
+     state.is_banned = true;
+     addOpenRouterRotationLog({
+       toKeyIndex: state.index,
+       reason: `OpenRouter Key Hard-Locked (Terminal Ban). Error: ${msg.substring(0, 100)}`
+     });
+     
+     // Hard mutate in DB to ensure persistent lock
+     if (admin.apps.length > 0) {
+       try {
+         admin.firestore().collection('system_metrics').doc(`api_key_${state.index + 100}`).set({
+           status: "HARD_LOCKED",
+           is_banned: true
+         }, { merge: true }).catch(console.error);
+       } catch (e) {}
+     }
+  } else if (errStatus === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("limit exceed")) {
     state.status = "rate_limited";
     addOpenRouterRotationLog({
       toKeyIndex: state.index,
@@ -919,6 +965,7 @@ function getGroqKey(): { key: string; state: KeyState } {
   
   const now = Date.now();
   groqKeyStates.forEach(s => {
+    if (s.status === "HARD_LOCKED" || s.is_banned) return;
     if ((s.status === "rate_limited" || s.status === "failed") && s.lastUsed && (now - s.lastUsed.getTime() > 120000)) {
        const oldStatus = s.status;
        s.status = "active";
@@ -936,6 +983,11 @@ function getGroqKey(): { key: string; state: KeyState } {
   
   while (attempts < groqKeyStates.length) {
     const s = groqKeyStates[currentGroqKeyIndex];
+    if (s.status === "HARD_LOCKED" || s.is_banned) {
+      currentGroqKeyIndex = (currentGroqKeyIndex + 1) % groqKeyStates.length;
+      attempts++;
+      continue;
+    }
     if (s.status === "active") {
         selectedState = s;
         break;
@@ -946,11 +998,13 @@ function getGroqKey(): { key: string; state: KeyState } {
   }
 
   if (!selectedState) {
-    selectedState = groqKeyStates[currentGroqKeyIndex];
+    const nonBannedKeys = groqKeyStates.filter(s => s.status !== "HARD_LOCKED" && !s.is_banned);
+    if (nonBannedKeys.length === 0) throw new Error("All Groq API keys are permanently BANNED or HARD_LOCKED.");
+    selectedState = nonBannedKeys[0];
     addGroqRotationLog({
        fromKeyIndex: originalIndex,
        toKeyIndex: selectedState.index,
-       reason: "All Groq keys are cooling down. Forced fallback to current index."
+       reason: "All active Groq keys are cooling down. Forced fallback to first non-banned key."
     });
   } else if (skippedIndices.length > 0) {
     addGroqRotationLog({
@@ -974,7 +1028,25 @@ function handleGroqError(state: KeyState, err: any) {
   state.errorCount++;
   updateKeyMetrics(state.index + 200, "error"); // +200 offset
   const msg = err?.message || err?.toString() || "";
-  if (err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("limit exceed")) {
+  const errStatus = err?.status || err?.response?.status;
+  
+  if (errStatus === 401 || errStatus === 403 || msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("invalid api key") || msg.toLowerCase().includes("suspended") || msg.toLowerCase().includes("banned") || msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("unauthorized")) {
+     state.status = "HARD_LOCKED";
+     state.is_banned = true;
+     addGroqRotationLog({
+       toKeyIndex: state.index,
+       reason: `Groq Key Hard-Locked (Terminal Ban). Error: ${msg.substring(0, 100)}`
+     });
+     
+     if (admin.apps.length > 0) {
+       try {
+         admin.firestore().collection('system_metrics').doc(`api_key_${state.index + 200}`).set({
+           status: "HARD_LOCKED",
+           is_banned: true
+         }, { merge: true }).catch(console.error);
+       } catch (e) {}
+     }
+  } else if (errStatus === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests") || msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("limit exceed")) {
     state.status = "rate_limited";
     addGroqRotationLog({
       toKeyIndex: state.index,
@@ -1082,7 +1154,7 @@ async function executeGenerateContentRoundRobin(contents: any, config: any = {})
                  "X-Title": "Henosis App"
               },
               body: JSON.stringify({
-                 model: "google/gemini-2.5-flash:free",
+                 model: "openai/gpt-oss-120b:free",
                  messages: [
                    ...(config.systemInstruction ? [{ role: "system", content: config.systemInstruction }] : []),
                    { role: "user", content: promptText }
@@ -1224,7 +1296,7 @@ app.post("/api/proxy/openrouter", async (req, res, next) => {
 
     while (attempts < maxAttempts && !success) {
       const { key, state } = getOpenRouterKey();
-      const currentModel = "google/gemini-2.5-flash:free";
+      const currentModel = "openai/gpt-oss-120b:free";
       attempts++;
       try {
         console.log(`[OpenRouter Proxy Route] Attempt ${attempts}: Using key index ${state.index} (${state.maskedKey}) with model ${currentModel}`);

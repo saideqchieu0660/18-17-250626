@@ -53,7 +53,7 @@ export default async function handler(req: Request) {
 
   const payload = await req.json();
   const messages = payload.messages;
-  const model = payload.model || "google/gemini-2.5-flash:free";
+  const model = payload.model || "openai/gpt-oss-120b:free";
   const temperature = payload.temperature ?? 0.7;
 
   // Lấy danh sách pool key

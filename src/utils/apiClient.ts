@@ -1237,7 +1237,7 @@ async function fetchOpenRouterDirect(apiKey: string, model: string, messages: an
   const modelsToTry = [
     (model && model !== "openai/gpt-oss-120b") ? model : "google/gemini-2.5-flash",
     "meta-llama/llama-3.1-8b-instruct:free",
-    "google/gemini-2.5-flash:free",
+    "openai/gpt-oss-120b:free",
     "meta-llama/llama-3-8b-instruct:free"
   ];
 

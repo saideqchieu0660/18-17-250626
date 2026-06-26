@@ -56,7 +56,8 @@ class MonitorErrorBoundary extends React.Component<
 interface KeyState {
   index: number;
   maskedKey: string;
-  status: "active" | "rate_limited" | "failed" | "exhausted";
+  status: "active" | "rate_limited" | "failed" | "exhausted" | "HARD_LOCKED";
+  is_banned?: boolean;
   usageCount: number;
   errorCount: number;
   lastUsed: string | null;
@@ -1339,6 +1340,11 @@ export function ServiceMonitor({
                               <AlertCircle className="w-3.5 h-3.5" /> FAILED
                             </span>
                           )}
+                          {(k.status === "HARD_LOCKED" || k.is_banned) && (
+                            <span className="flex items-center gap-1 text-xs font-bold text-red-700 bg-red-200 dark:bg-red-950/50 px-2 py-1 rounded-full border border-red-500/50">
+                              <AlertCircle className="w-3.5 h-3.5" /> BANNED / TERMINATED
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1375,7 +1381,8 @@ export function ServiceMonitor({
                           </span>
                           <span className="font-medium">
                             {k.status === "rate_limited" ||
-                            k.status === "exhausted"
+                            k.status === "exhausted" ||
+                            k.status === "HARD_LOCKED"
                               ? "100%"
                               : `${Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%`}
                           </span>
@@ -1392,7 +1399,8 @@ export function ServiceMonitor({
                             style={{
                               width:
                                 k.status === "rate_limited" ||
-                                k.status === "exhausted"
+                                k.status === "exhausted" ||
+                                k.status === "HARD_LOCKED"
                                   ? "100%"
                                   : `${Math.min((k.usageCount / 1500) * 100, 100)}%`,
                             }}
@@ -1647,7 +1655,8 @@ export function ServiceMonitor({
                             </span>
                             <span className="font-medium">
                               {k.status === "rate_limited" ||
-                              k.status === "exhausted"
+                              k.status === "exhausted" ||
+                              k.status === "HARD_LOCKED"
                                 ? "100%"
                                 : `${Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%`}
                             </span>
